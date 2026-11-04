@@ -14,8 +14,10 @@ UkisAI recovery run on the swifter DeepSeek-V4.1-Flash checkpoint.
   gradient clip 1.0, batch 64 prompts x 1 fresh response, 1 optimizer step per
   rollout batch, temperature 1 / top-p 1 / top-k -1 (slime defaults; the
   launcher pins temperature 1).
-- Eval recipe: 4 samples per prompt, temperature 0.7, top-p 0.8, top-k 20,
-  32,768 max tokens, math grader (boxed answer), passrate logged.
+- Eval recipe: 4 samples per prompt, temperature 1, top-p 1, top-k -1,
+  32,768 max tokens, math grader (boxed answer), passrate logged. Note: this
+  deviates from the paper's canonical eval decoding (0.7/0.8/20) by explicit
+  user request; expect slightly noisier and typically lower pass@4 values.
 - Known canonical nuance (documented upstream): lowest-token selection is per
   data-parallel rank's packed batch, not global.
 

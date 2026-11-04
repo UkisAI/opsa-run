@@ -6,6 +6,8 @@
 #   * save-interval 10 and eval-interval 10 (upstream: 20)
 #   * eval = AIME 2026, 4 samples per prompt, pass@4 logged (--log-passrate)
 #   * training sampling stays temperature 1, top-p 1, top-k -1 (slime defaults)
+#   * eval decoding set to temperature 1, top-p 1, top-k -1 by user request
+#     (upstream/paper canonical eval is temperature 0.7, top-p 0.8, top-k 20)
 #   * supports an absolute path in DEEPSEEK_V41_MODEL_CONFIG for the
 #     swifter checkpoint's converted Megatron model definition
 
@@ -426,9 +428,9 @@ EVAL_ARGS=(
    --eval-label-key label
    --n-samples-per-eval-prompt 4
    --eval-max-response-len "$EVAL_MAX_RESPONSE_LEN"
-   --eval-top-p 0.8
-   --eval-temperature 0.7
-   --eval-top-k 20
+   --eval-top-p 1
+   --eval-temperature 1
+   --eval-top-k -1
    --eval-rm-type math
    --log-passrate
 )

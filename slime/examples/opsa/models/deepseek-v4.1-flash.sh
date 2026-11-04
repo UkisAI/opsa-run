@@ -22,9 +22,10 @@ ROLLOUT_GPUS="${DEEPSEEK_V41_ROLLOUT_GPUS:-8}"
 TENSOR_MODEL_PARALLEL_SIZE="${DEEPSEEK_V41_TP:-8}"
 ROLLOUT_GPUS_PER_ENGINE="${DEEPSEEK_V41_ROLLOUT_GPUS_PER_ENGINE:-1}"
 
-# Canonical OPSA decoding: train at temperature 1, top-p 1, top-k -1 with
-# 12,000-token responses; eval at temperature 0.7, top-k 20, top-p 0.8 with
-# 32,768-token responses.
+# UkisAI run decoding: train AND eval at temperature 1, top-p 1, top-k -1
+# (train: 12,000-token responses, eval: 32,768-token responses). The paper's
+# canonical eval decoding is temperature 0.7, top-p 0.8, top-k 20; this run
+# intentionally uses full sampling for eval as well.
 ROLLOUT_MAX_RESPONSE_LEN="${DEEPSEEK_V41_ROLLOUT_MAX_RESPONSE_LEN:-12000}"
 EVAL_MAX_RESPONSE_LEN="${DEEPSEEK_V41_EVAL_MAX_RESPONSE_LEN:-32768}"
 MAX_TOKENS_PER_GPU="${DEEPSEEK_V41_MAX_TOKENS_PER_GPU:-16384}"
