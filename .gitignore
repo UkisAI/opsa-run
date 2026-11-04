@@ -196,3 +196,7 @@ _examples_synced/
 # Local backup files
 *.bak
 *.orig
+
+# UkisAI opsa-run generated data and eval outputs
+data/openthoughts_agent_100k_prompts.jsonl
+benchmarks/runs/

@@ -1,3 +1,72 @@
+# UkisAI OPSA Run (DeepSeek-V4.1-Flash, swifter checkpoint)
+
+This repo is a copy of [DripNowhy/On-Policy-Self-Adaptation](https://github.com/DripNowhy/On-Policy-Self-Adaptation)
+(the canonical OPSA training code, paper arXiv:2608.31046) adapted for the
+UkisAI recovery run on the swifter DeepSeek-V4.1-Flash checkpoint.
+
+## What was audited (upstream code, no errors found)
+
+- Core OPSA math (`slime/slime/backends/megatron_utils/opsa.py`): bottom-20%
+  lowest-logp selection across the DP-local packed batch, entropy-ranked
+  advantages in `[-1.0, -0.5]`, zero loss mask for unselected tokens, zero task
+  reward, no reference model / KL. `tests/test_opsa.py` (29 tests) passes.
+- Training recipe: Adam LR 1e-6 constant, betas .9/.98, weight decay .1,
+  gradient clip 1.0, batch 64 prompts x 1 fresh response, 1 optimizer step per
+  rollout batch, temperature 1 / top-p 1 / top-k -1 (slime defaults; the
+  launcher pins temperature 1).
+- Eval recipe: 4 samples per prompt, temperature 0.7, top-p 0.8, top-k 20,
+  32,768 max tokens, math grader (boxed answer), passrate logged.
+- Known canonical nuance (documented upstream): lowest-token selection is per
+  data-parallel rank's packed batch, not global.
+
+## What changed for this run
+
+| Item | Upstream | This run |
+|---|---|---|
+| Base model | Qwen3 / Qwen3.5 / OLMo3 presets | `deepseek-v4.1-flash` preset (swifter checkpoint) |
+| Training steps | 700-1000 | **150** (pilot; extend with `--steps` if the eval slope is positive) |
+| Save interval | 20 | **10** |
+| Eval interval | 20 | **10** |
+| Eval benchmark | AIME validation set | **AIME 2026** (MathArena/aime_2026, 30 problems, **pass@4**) |
+| Training prompts | DAPO-17k | **open-thoughts/OpenThoughts-Agent-SFT-100K** (94,334 terminus-2 trajectories; prompts only) |
+
+## Run
+
+```bash
+cd slime
+
+# 1. Training prompts (OPSA uses only prompts; generate locally, ~94k rows):
+python tools/prepare_openthoughts_agent_prompts.py \
+    --out data/openthoughts_agent_100k_prompts.jsonl
+
+# 2. AIME 2026 eval file (30 problems, committed at data/aime2026_eval.jsonl):
+python tools/prepare_aime2026_eval.py --out data/aime2026_eval.jsonl
+
+# 3. Convert the swifter checkpoint to a Megatron actor checkpoint, then:
+export DEEPSEEK_V41_MODEL_CONFIG=/path/to/swifter/model/definition.sh
+bash examples/opsa/run_opsa_ukis.sh \
+    --hf-checkpoint /path/to/swifter/hf \
+    --actor-checkpoint /path/to/swifter/megatron \
+    --save-dir /path/to/opsa_run_out \
+    --prompt-data data/openthoughts_agent_100k_prompts.jsonl \
+    --eval-data data/aime2026_eval.jsonl \
+    --megatron-path /path/to/Megatron-LM \
+    --steps 150
+```
+
+Ship the best checkpoint by the logged AIME 2026 pass@4 (eval every 10 steps),
+never a fixed step. To continue past 150 steps: `--steps 300` (the prompt pool
+supports ~1,400 steps without repeating a prompt).
+
+Standalone AIME 2026 scoring of a served model (same protocol as
+UkisAI/Benchmark_configs):
+
+```bash
+python benchmarks/aime_2026.py --api-base http://127.0.0.1:8000/v1
+```
+
+---
+
 <div align="center">
 
 # Does On-Policy Distillation Really Distill? From Noisy Teacher to Self-Improvement
