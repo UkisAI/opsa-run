@@ -34,6 +34,27 @@ UkisAI recovery run on the swifter DeepSeek-V4.1-Flash checkpoint.
 
 ## Run
 
+## Model and data for this run
+
+- **Path to the model (starting checkpoint)**: the **step80 OPSA
+  DeepSeek-V4.1** checkpoint, stored in the AWS S3 bucket
+  `deepseek opsa step80` (normalized URI: `s3://deepseek-opsa-step80/`; confirm
+  the exact account-suffixed bucket name if it differs). This step80 model is
+  what this run continues from:
+  - full training checkpoint (optimizer + RNG state): pass it via
+    `--resume-from`
+  - weights-only checkpoint: convert to a Megatron dist checkpoint with
+    `tools/convert_hf_to_torch_dist.py` first, then pass via
+    `--actor-checkpoint`
+- **Training prompts**:
+  https://huggingface.co/datasets/open-thoughts/OpenThoughts-Agent-SFT-100K
+  (94,334 terminus-2 trajectories; OPSA consumes prompts only - the model
+  generates fresh responses, dataset responses are never trained on).
+- **Eval**: AIME 2026 (`data/aime2026_eval.jsonl`, from
+  `MathArena/aime_2026`, 30 problems), pass@4, every 10 steps.
+
+### Commands
+
 ```bash
 cd slime
 
@@ -46,9 +67,15 @@ python tools/prepare_aime2026_eval.py --out data/aime2026_eval.jsonl
 
 # 3. Convert the swifter checkpoint to a Megatron actor checkpoint, then:
 export DEEPSEEK_V41_MODEL_CONFIG=/path/to/swifter/model/definition.sh
+
+# starting model: the step80 OPSA DeepSeek-V4.1 checkpoint (S3 bucket
+# "deepseek opsa step80") - this is the path to the model for this run
+aws s3 cp --recursive s3://deepseek-opsa-step80/ /path/to/step80/
+
 bash examples/opsa/run_opsa_ukis.sh \
     --hf-checkpoint /path/to/swifter/hf \
     --actor-checkpoint /path/to/swifter/megatron \
+    --resume-from /path/to/step80 \
     --save-dir /path/to/opsa_run_out \
     --prompt-data data/openthoughts_agent_100k_prompts.jsonl \
     --eval-data data/aime2026_eval.jsonl \
