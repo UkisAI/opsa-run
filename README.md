@@ -30,7 +30,7 @@ UkisAI recovery run on the swifter DeepSeek-V4.1-Flash checkpoint.
 | Save interval | 20 | **10** |
 | Eval interval | 20 | **10** |
 | Eval benchmark | AIME validation set | **AIME 2026** (MathArena/aime_2026, 30 problems, **pass@4**) |
-| Training prompts | DAPO-17k | **open-thoughts/OpenThoughts-Agent-SFT-100K** (94,334 terminus-2 trajectories; prompts only) |
+| Training prompts | DAPO-17k | **ukisai/opsa_50k_training_v1** (48,448 multi-domain prompts built from NVIDIA Nemotron post-training datasets; prompts only) |
 
 ## Run
 
@@ -48,10 +48,12 @@ UkisAI recovery run on the swifter DeepSeek-V4.1-Flash checkpoint.
   (Weights-only checkpoints would need `tools/convert_hf_to_torch_dist.py`
   conversion and `--actor-checkpoint` instead. Benchmark artifacts for step80
   live alongside at `.../dsv41-s160-opsa-agent-lr1e-6/bench_update_0080/`.)
-- **Training prompts**:
-  https://huggingface.co/datasets/open-thoughts/OpenThoughts-Agent-SFT-100K
-  (94,334 terminus-2 trajectories; OPSA consumes prompts only - the model
-  generates fresh responses, dataset responses are never trained on).
+- **Training prompts**: https://huggingface.co/datasets/ukisai/opsa_50k_training_v1
+  (48,448 multi-domain prompts built from NVIDIA's Nemotron post-training
+  datasets, Sep-Oct 2026 - fresher and broader than the earlier
+  open-thoughts/OpenThoughts-Agent-SFT-100K plan, which is superseded.
+  OPSA consumes prompts only - the model generates fresh responses, dataset
+  responses are never trained on).
 - **Eval**: AIME 2026 (`data/aime2026_eval.jsonl`, from
   `MathArena/aime_2026`, 30 problems), pass@4, every 10 steps.
 
@@ -60,9 +62,12 @@ UkisAI recovery run on the swifter DeepSeek-V4.1-Flash checkpoint.
 ```bash
 cd slime
 
-# 1. Training prompts (OPSA uses only prompts; generate locally, ~94k rows):
-python tools/prepare_openthoughts_agent_prompts.py \
-    --out data/openthoughts_agent_100k_prompts.jsonl
+# 1. Training prompts: ukisai/opsa_50k_training_v1 (48,448 multi-domain prompts
+#    built from NVIDIA Nemotron post-training datasets - fresher and broader
+#    than the earlier OpenThoughts-Agent-100K plan). slime-ready JSONL:
+huggingface-cli download ukisai/opsa_50k_training_v1 \
+    data/opsa_50k_training_v1.jsonl --repo-type dataset --local-dir data
+# (regenerate from source with: python tools/prepare_nemotron_prompts.py)
 
 # 2. AIME 2026 eval file (30 problems, committed at data/aime2026_eval.jsonl):
 python tools/prepare_aime2026_eval.py --out data/aime2026_eval.jsonl
@@ -79,7 +84,7 @@ bash examples/opsa/run_opsa_ukis.sh \
     --actor-checkpoint /path/to/swifter/megatron \
     --resume-from /path/to/step80 \
     --save-dir /path/to/opsa_run_out \
-    --prompt-data data/openthoughts_agent_100k_prompts.jsonl \
+    --prompt-data data/opsa_50k_training_v1.jsonl \
     --eval-data data/aime2026_eval.jsonl \
     --megatron-path /path/to/Megatron-LM \
     --steps 150

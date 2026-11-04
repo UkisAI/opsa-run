@@ -200,3 +200,6 @@ _examples_synced/
 # UkisAI opsa-run generated data and eval outputs
 data/openthoughts_agent_100k_prompts.jsonl
 benchmarks/runs/
+
+# Generated Nemotron 50k build output (lives on HF: ukisai/opsa_50k_training_v1)
+data/opsa_50k_training_v1/
