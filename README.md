@@ -49,11 +49,19 @@ UkisAI recovery run on the swifter DeepSeek-V4.1-Flash checkpoint.
   conversion and `--actor-checkpoint` instead. Benchmark artifacts for step80
   live alongside at `.../dsv41-s160-opsa-agent-lr1e-6/bench_update_0080/`.)
 - **Training prompts**: https://huggingface.co/datasets/ukisai/opsa_50k_training_v1
-  (48,448 multi-domain prompts built from NVIDIA's Nemotron post-training
+  (48,811 multi-domain prompts built from NVIDIA's Nemotron post-training
   datasets, Sep-Oct 2026 - fresher and broader than the earlier
   open-thoughts/OpenThoughts-Agent-SFT-100K plan, which is superseded.
   OPSA consumes prompts only - the model generates fresh responses, dataset
-  responses are never trained on).
+  responses are never trained on). Every row carries verifiable provenance
+  (`source`, `source_path`, `source_row`, `source_seek`, `row_sha1`, `row_id`).
+- **SFT companion (full traces)**: https://huggingface.co/datasets/ukisai/opsa_sft_50k_v1
+  - 45,965 rows, 38,465 with full multi-turn traces (`trace_type == "full"`,
+    assistant turns included); the 7,500 `prompt_only` rows come from the
+    Nemotron RL sets, which have no assistant turns. Linked 1:1 to the prompt
+    dataset by `row_id`/`row_sha1`; each row is byte-verifiable against its
+    NVIDIA source (recipe in the dataset card). Use for SFT; 2-epoch
+    muon+adamw convention applies.
 - **Eval**: AIME 2026 (`data/aime2026_eval.jsonl`, from
   `MathArena/aime_2026`, 30 problems), pass@4, every 10 steps.
 

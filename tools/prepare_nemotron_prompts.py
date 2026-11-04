@@ -16,9 +16,21 @@ All sources are read as raw lines (JSONL) via HfFileSystem range reads, or as
 row-group slices for parquet shards - no full downloads, no `datasets`
 streaming (immune to heterogeneous-column parse failures).
 
-Output: slime-format JSONL rows
-    {"prompt": [{"role": ..., "content": ...}], "label": "", "source": repo,
-     "tools": [...]}   # tools only when the source provides them
+Outputs (one build, two files):
+* <out>/opsa_50k_training_v1.jsonl - slime-format prompt rows
+      {"prompt": [...], "label", "source", "tools", "source_path",
+       "source_row", "source_seek", "row_sha1", "row_id"}
+* <out>/opsa_sft_50k_v1.jsonl - SFT companion with FULL message traces,
+      linked 1:1 by row_id/row_sha1:
+      {"messages": [full trace], "trace_type": "full"|"prompt_only",
+       "label", "source", "source_path", "source_row", "source_seek",
+       "row_sha1", "row_id"}
+
+Provenance is verifiable: for JSONL rows, seek to `source_seek` in the source
+file, discard the partial line at the boundary, then read `source_row` lines;
+sha1 of that line equals `row_sha1`. For parquet rows, `source_row` is the
+absolute row index in the shard and `row_sha1` hashes the canonical
+json.dumps(row, sort_keys=True) of that row.
 
 Usage:
     python tools/prepare_nemotron_prompts.py --out data/opsa_50k_training_v1
@@ -196,11 +208,13 @@ EXTRACTORS = {
 
 
 def read_jsonl_slice(dataset, path, start_fraction, count, seed):
-    """Read `count` parsed lines from a seeded slice of an HF JSONL file."""
+    """Read `count` parsed lines from a seeded slice of an HF JSONL file.
+    Yields (row, provenance) with a byte-verbatim line hash."""
     fs_path = f"datasets/{dataset}/{path}"
     info = FS.info(fs_path)
     start = int(info["size"] * start_fraction) if start_fraction > 0 else 0
     rows, f = [], None
+    line_index = 0
     try:
         f = FS.open(fs_path)
         if start:
@@ -213,17 +227,29 @@ def read_jsonl_slice(dataset, path, start_fraction, count, seed):
             line = line.strip()
             if line:
                 try:
-                    rows.append(json.loads(line))
+                    rows.append((json.loads(line), {
+                        "source_path": path,
+                        "source_row": line_index,
+                        "source_seek": start,
+                        "row_sha1": hashlib.sha1(line).hexdigest(),
+                    }))
                 except json.JSONDecodeError:
                     continue
+            line_index += 1
     finally:
         if f is not None:
             f.close()
     return rows
 
 
+def stable_seed(key):
+    """Process-independent seed (Python's hash() is salted per run)."""
+    return int(hashlib.sha1(key.encode("utf-8")).hexdigest()[:8], 16)
+
+
 def read_parquet_slice(dataset, path, count, seed):
-    """Read `count` rows from a seeded slice of an HF parquet shard."""
+    """Read `count` rows from a seeded slice of an HF parquet shard.
+    Yields (row, provenance) with the absolute row index."""
     import pyarrow.parquet as pq
 
     fs_path = f"datasets/{dataset}/{path}"
@@ -241,7 +267,15 @@ def read_parquet_slice(dataset, path, count, seed):
         lo = max(start - group_start, 0)
         hi = min(end - group_start, group_len)
         if hi > lo:
-            rows.extend(table.slice(lo, hi - lo).to_pylist())
+            for local_idx, row in enumerate(table.slice(lo, hi - lo).to_pylist()):
+                rows.append((row, {
+                    "source_path": path,
+                    "source_row": group_start + lo + local_idx,
+                    "source_seek": None,
+                    "row_sha1": hashlib.sha1(
+                        json.dumps(row, sort_keys=True, ensure_ascii=False).encode("utf-8")
+                    ).hexdigest(),
+                }))
         offset += group_len
         row_group += 1
     return rows
@@ -250,22 +284,26 @@ def read_parquet_slice(dataset, path, count, seed):
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", default="data/opsa_50k_training_v1")
+    parser.add_argument("--sft-out", default="data/opsa_sft_50k_v1")
     parser.add_argument("--cap", type=int, default=50000)
     args = parser.parse_args()
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
+    sft_out = Path(args.sft_out)
+    sft_out.mkdir(parents=True, exist_ok=True)
     seen: set[str] = set()
     rows: list[dict] = []
+    sft_rows: list[dict] = []
 
     for dataset, extractor, quota, path, start_fraction in SOURCES:
-        seed = SEED + (hash(f"{dataset}|{path}") % 100000)
+        seed = SEED + (stable_seed(f"{dataset}|{path}") % 100000)
         if path.endswith(".parquet"):
             raw_rows = read_parquet_slice(dataset, path, quota + 200, seed)
         else:
             raw_rows = read_jsonl_slice(dataset, path, start_fraction, quota * 2, seed)
         got = 0
-        for raw in raw_rows:
+        for raw, prov in raw_rows:
             if got >= quota:
                 break
             out_row = EXTRACTORS[extractor](raw, dataset)
@@ -275,7 +313,14 @@ def main() -> None:
             if digest in seen:
                 continue
             seen.add(digest)
+            out_row.update(prov)
+            out_row["row_id"] = hashlib.sha1(
+                f"{dataset}|{prov['source_path']}|{prov['source_row']}".encode()
+            ).hexdigest()
             rows.append(out_row)
+            sft_row = _sft_trace(raw, dataset, prov, out_row["row_id"])
+            if sft_row is not None:
+                sft_rows.append(sft_row)
             got += 1
         print(f"{dataset} {path}: {got}/{quota}", flush=True)
 
@@ -295,12 +340,62 @@ def main() -> None:
     ]
     hfds.Dataset.from_list(parquet_rows).to_parquet(out / "train-00000-of-00001.parquet")
 
+    sft_jsonl_path = sft_out / "opsa_sft_50k_v1.jsonl"
+    with sft_jsonl_path.open("w", encoding="utf-8") as f:
+        for row in sft_rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    sft_parquet_rows = []
+    for r in sft_rows:
+        item = {k: v for k, v in r.items() if k != "messages"}
+        item["messages_json"] = json.dumps(r["messages"], ensure_ascii=False)
+        sft_parquet_rows.append(item)
+    hfds.Dataset.from_list(sft_parquet_rows).to_parquet(sft_out / "train-00000-of-00001.parquet")
+
     from collections import Counter
 
     counts = Counter(r["source"] for r in rows)
     print(f"\ntotal {len(rows)} rows -> {jsonl_path}")
     for source, count in counts.most_common():
         print(f"  {source}: {count}")
+    sft_counts = Counter(r["source"] for r in sft_rows)
+    full = sum(1 for r in sft_rows if r["trace_type"] == "full")
+    print(f"sft companion: {len(sft_rows)} rows ({full} full traces) -> {sft_jsonl_path}")
+
+
+def _sft_trace(raw, source, prov, row_id):
+    """SFT companion row: full normalized message trace when the source row has
+    an assistant turn; otherwise the prompt-only messages with a label."""
+    messages = [
+        {"role": str(m.get("role")), "content": _text_of(m.get("content"))}
+        for m in (raw.get("messages") or [])
+        if isinstance(m, dict) and _text_of(m.get("content")).strip()
+    ]
+    if messages and any(m["role"] == "assistant" for m in messages):
+        trace_type = "full"
+    else:
+        messages = [
+            {"role": str(m.get("role") or "user"), "content": _text_of(m.get("content")).strip()}
+            for m in (raw.get("responses_create_params") or {}).get("input") or []
+            if isinstance(m, (dict, str))
+        ]
+        messages = [m for m in messages if m["content"]]
+        for m in messages:
+            m["role"] = m.get("role") or "user"
+        if not messages:
+            return None
+        trace_type = "prompt_only"
+    label = ""
+    if raw.get("expected_answer") is not None:
+        label = str(raw["expected_answer"])
+    row = {
+        "messages": messages,
+        "trace_type": trace_type,
+        "label": label,
+        "source": source,
+        "row_id": row_id,
+    }
+    row.update(prov)
+    return row
 
 
 if __name__ == "__main__":

@@ -203,3 +203,7 @@ benchmarks/runs/
 
 # Generated Nemotron 50k build output (lives on HF: ukisai/opsa_50k_training_v1)
 data/opsa_50k_training_v1/
+
+# SFT companion build output (lives on HF: ukisai/opsa_sft_50k_v1)
+data/opsa_sft_50k_v1/*.jsonl
+data/opsa_sft_50k_v1/*.parquet
